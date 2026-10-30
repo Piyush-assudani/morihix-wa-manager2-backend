@@ -376,7 +376,12 @@ const createTemplate = async (
     return response.data;
   } catch (err) {
     console.error("❌ Meta API createTemplate error:", err.response?.data || err.message);
-    throw new Error(err.response?.data?.error?.user_msg || err.response?.data?.error?.message || err.message);
+    const metaErr = err.response?.data?.error;
+    let errorDetail = metaErr?.error_user_msg || metaErr?.error_user_title || metaErr?.user_msg || metaErr?.message || err.message;
+    if (metaErr?.code === 131009 || metaErr?.error_subcode === 2494102 || metaErr?.error_subcode === 2388273) {
+      errorDetail = "Meta requires an active sample media upload to create templates with Image/Video/Document headers. Please create media header templates directly in Meta WhatsApp Business Manager (business.facebook.com), or select 'None (Text Only)' here.";
+    }
+    throw new Error(errorDetail);
   }
 };
 
