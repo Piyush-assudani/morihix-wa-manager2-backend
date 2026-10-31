@@ -288,6 +288,78 @@ const getTemplates = async () => {
   }
 };
 
+let cachedAppId = null;
+
+const getMetaAppId = async () => {
+  if (cachedAppId) return cachedAppId;
+  const { apiBase, token } = getMetaConfig();
+  try {
+    const res = await axios.get(`${apiBase}/app`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 10000,
+    });
+    cachedAppId = res.data?.id;
+    return cachedAppId;
+  } catch (err) {
+    console.error("❌ Failed to query Meta app ID:", err.response?.data || err.message);
+    return null;
+  }
+};
+
+// 1x1 transparent PNG buffer for fallback sample
+const DEFAULT_SAMPLE_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+  "base64"
+);
+// Minimal valid PDF for fallback sample
+const DEFAULT_SAMPLE_PDF = Buffer.from(
+  "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n3 0 obj<</Type/Page/MediaBox[0 0 3 3]>>endobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000052 00000 n\n0000000101 00000 n\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n147\n%%EOF\n"
+);
+
+const createSampleMediaHandle = async (fileBuffer, mimeType, fileName) => {
+  const { apiBase, token } = getMetaConfig();
+  const appId = await getMetaAppId();
+
+  if (!appId || !token) {
+    throw new Error("Unable to obtain Meta App ID or Access Token for sample media upload.");
+  }
+
+  // 1. Create upload session
+  const sessionRes = await axios.post(`${apiBase}/${appId}/uploads`, null, {
+    params: {
+      file_length: fileBuffer.length,
+      file_type: mimeType,
+      file_name: fileName || "sample_file",
+    },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    timeout: 20000,
+  });
+
+  const uploadId = sessionRes.data?.id;
+  if (!uploadId) {
+    throw new Error("Meta Resumable Upload session failed to return upload ID.");
+  }
+
+  // 2. Upload binary stream
+  const uploadRes = await axios.post(`${apiBase}/${uploadId}`, fileBuffer, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      file_offset: 0,
+      "Content-Type": "application/octet-stream",
+    },
+    timeout: 30000,
+  });
+
+  const handle = uploadRes.data?.h;
+  if (!handle) {
+    throw new Error("Meta Resumable Upload failed to return header_handle.");
+  }
+
+  return handle;
+};
+
 const createTemplate = async (
   name,
   language,
@@ -296,7 +368,8 @@ const createTemplate = async (
   headerType = "NONE",
   headerText = "",
   footerText = "",
-  buttons = []
+  buttons = [],
+  sampleFile = null
 ) => {
   const { apiBase, token, wabaId } = getMetaConfig();
 
@@ -320,11 +393,35 @@ const createTemplate = async (
           text: headerText,
         });
       } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType)) {
+        let sampleBuffer = null;
+        let sampleMime = "image/png";
+        let sampleName = "sample.png";
+
+        if (sampleFile && sampleFile.buffer) {
+          sampleBuffer = sampleFile.buffer;
+          sampleMime = sampleFile.mimetype || "image/png";
+          sampleName = sampleFile.originalname || "sample";
+        } else if (sampleFile && sampleFile.path) {
+          sampleBuffer = await fs.promises.readFile(sampleFile.path);
+          sampleMime = sampleFile.mimetype || "image/png";
+          sampleName = sampleFile.originalname || "sample";
+        } else if (headerType === "DOCUMENT") {
+          sampleBuffer = DEFAULT_SAMPLE_PDF;
+          sampleMime = "application/pdf";
+          sampleName = "sample.pdf";
+        } else {
+          sampleBuffer = DEFAULT_SAMPLE_PNG;
+          sampleMime = "image/png";
+          sampleName = "sample.png";
+        }
+
+        const realHandle = await createSampleMediaHandle(sampleBuffer, sampleMime, sampleName);
+
         components.unshift({
           type: "HEADER",
           format: headerType,
           example: {
-            header_handle: ["4:YXNpY..."],
+            header_handle: [realHandle],
           },
         });
       }
