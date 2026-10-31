@@ -45,7 +45,7 @@ const initBullMQ = (io) => {
     campaignWorker = new Worker(
       "campaign-messages",
       async (job) => {
-        const { to, templateName, languageCode, campaignId, contactId, mediaId, mediaType } = job.data;
+        const { to, templateName, languageCode, campaignId, contactId, mediaId, mediaType, mediaUrl } = job.data;
 
         let components = [];
         if (mediaId && mediaType) {
@@ -70,12 +70,13 @@ const initBullMQ = (io) => {
         const result = await sendTemplateMessage(to, templateName, languageCode, components);
 
         await db.query(
-          `INSERT INTO messages (campaign_id, contact_id, direction, message_body, meta_message_id, status, error_message, timestamp)
-           VALUES ($1, $2, 'outbound', $3, $4, $5, $6, NOW())`,
+          `INSERT INTO messages (campaign_id, contact_id, direction, message_body, media_url, meta_message_id, status, error_message, timestamp)
+           VALUES ($1, $2, 'outbound', $3, $4, $5, $6, $7, NOW())`,
           [
             campaignId,
             contactId,
             `[Template: ${templateName}]`,
+            mediaUrl || null,
             result.messageId || null,
             result.success ? "sent" : "failed",
             result.success ? null : (result.error || "Failed to send template message via Meta API"),
@@ -128,7 +129,7 @@ const initBullMQ = (io) => {
 
 
 
-const processInMemory = async (messages, campaignId, templateName, languageCode, io, mediaId = null, mediaType = null) => {
+const processInMemory = async (messages, campaignId, templateName, languageCode, io, mediaId = null, mediaType = null, mediaUrl = null) => {
   const DELAY_MS = 2000; 
 
   let components = [];
@@ -159,12 +160,13 @@ const processInMemory = async (messages, campaignId, templateName, languageCode,
       const result = await sendTemplateMessage(to, templateName, languageCode, messageComponents);
 
       await db.query(
-        `INSERT INTO messages (campaign_id, contact_id, direction, message_body, meta_message_id, status, error_message, timestamp)
-         VALUES ($1, $2, 'outbound', $3, $4, $5, $6, NOW())`,
+        `INSERT INTO messages (campaign_id, contact_id, direction, message_body, media_url, meta_message_id, status, error_message, timestamp)
+         VALUES ($1, $2, 'outbound', $3, $4, $5, $6, $7, NOW())`,
         [
           campaignId,
           contactId,
           `[Template: ${templateName}]`,
+          mediaUrl || null,
           result.messageId || null,
           result.success ? "sent" : "failed",
           result.success ? null : (result.error || "Failed to send template message via Meta API"),
@@ -189,12 +191,13 @@ const processInMemory = async (messages, campaignId, templateName, languageCode,
     } catch (error) {
       console.error(`Error sending message to ${to}:`, error);
       await db.query(
-        `INSERT INTO messages (campaign_id, contact_id, direction, message_body, meta_message_id, status, error_message, timestamp)
-         VALUES ($1, $2, 'outbound', $3, NULL, 'failed', $4, NOW())`,
+        `INSERT INTO messages (campaign_id, contact_id, direction, message_body, media_url, meta_message_id, status, error_message, timestamp)
+         VALUES ($1, $2, 'outbound', $3, $4, NULL, 'failed', $5, NOW())`,
         [
           campaignId,
           contactId,
           `[Template: ${templateName}]`,
+          mediaUrl || null,
           error.message || "Unexpected error while sending template message",
         ]
       ).catch(() => {});
@@ -211,7 +214,7 @@ const processInMemory = async (messages, campaignId, templateName, languageCode,
 
 
 
-const processCampaign = async (messages, campaignId, templateName, languageCode, io, mediaId = null, mediaType = null) => {
+const processCampaign = async (messages, campaignId, templateName, languageCode, io, mediaId = null, mediaType = null, mediaUrl = null) => {
   if (bullmqAvailable && campaignQueue) {
     
     console.log(`📨 Enqueueing ${messages.length} messages via BullMQ`);
@@ -224,6 +227,7 @@ const processCampaign = async (messages, campaignId, templateName, languageCode,
         campaignId,
         mediaId,
         mediaType,
+        mediaUrl,
         bodyParams: msg.bodyParams,
       });
     }
@@ -231,7 +235,7 @@ const processCampaign = async (messages, campaignId, templateName, languageCode,
     
     console.log(`📨 Processing ${messages.length} messages in-memory`);
     
-    processInMemory(messages, campaignId, templateName, languageCode, io, mediaId, mediaType).catch((err) => {
+    processInMemory(messages, campaignId, templateName, languageCode, io, mediaId, mediaType, mediaUrl).catch((err) => {
       console.error("❌ In-memory campaign processing error:", err);
     });
   }

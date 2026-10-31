@@ -11,6 +11,18 @@ const isValidUuid = (val) =>
   typeof val === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
 
+const isImageUrl = (url) => {
+  if (!url || typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false;
+  if (/\s/.test(trimmed)) return false;
+  return (
+    /\.(jpg|jpeg|png|webp|gif|svg|bmp|ico|tiff|heic)(\?.*)?$/i.test(trimmed) ||
+    /googleusercontent\.com|encrypted-tbn[0-9]\.gstatic\.com\/images|images\.unsplash\.com|cdn\.pixabay\.com|res\.cloudinary\.com|lookaside\.fbsbx\.com|mmg\.whatsapp\.net/i.test(trimmed) ||
+    /[?&]q=tbn:|[?&]mime=image|[?&]format=(jpg|jpeg|png|webp)/i.test(trimmed)
+  );
+};
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: os.tmpdir(),
@@ -64,9 +76,11 @@ router.get("/:contactId", async (req, res) => {
     const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
     const messagesResult = await db.query(
-      `SELECT * FROM messages
-       WHERE contact_id = $1
-       ORDER BY timestamp ASC NULLS FIRST, id ASC
+      `SELECT m.*, COALESCE(m.media_url, c.media_url) AS media_url
+       FROM messages m
+       LEFT JOIN campaigns c ON m.campaign_id = c.id
+       WHERE m.contact_id = $1
+       ORDER BY m.timestamp ASC NULLS FIRST, m.id ASC
        LIMIT $2 OFFSET $3`,
       [contactId, safeLimit, safeOffset]
     );
@@ -190,7 +204,15 @@ router.post("/:contactId", async (req, res) => {
       });
     }
 
-    const result = await sendTextMessage(contact.phone_number, message);
+    const trimmedMessage = typeof message === "string" ? message.trim() : "";
+    const isImage = isImageUrl(trimmedMessage);
+
+    let result;
+    if (isImage) {
+      result = await sendMediaMessage(contact.phone_number, trimmedMessage, "image");
+    } else {
+      result = await sendTextMessage(contact.phone_number, message);
+    }
 
     if (!result.success) {
       return res.status(502).json({
@@ -199,11 +221,14 @@ router.post("/:contactId", async (req, res) => {
       });
     }
 
+    const displayBody = isImage ? "[Image]" : message;
+    const mediaUrl = isImage ? trimmedMessage : null;
+
     const msgResult = await db.query(
-      `INSERT INTO messages (contact_id, direction, message_body, meta_message_id, status, timestamp)
-       VALUES ($1, 'outbound', $2, $3, 'sent', NOW())
+      `INSERT INTO messages (contact_id, direction, message_body, media_url, meta_message_id, status, timestamp)
+       VALUES ($1, 'outbound', $2, $3, $4, 'sent', NOW())
        RETURNING *`,
-      [contactId, message, result.messageId]
+      [contactId, displayBody, mediaUrl, result.messageId]
     );
 
     const savedMessage = msgResult.rows[0];
@@ -216,7 +241,8 @@ router.post("/:contactId", async (req, res) => {
         contact_phone: contact.phone_number,
         contact_name: contact.name,
         direction: "outbound",
-        message_body: message,
+        message_body: displayBody,
+        media_url: mediaUrl,
         meta_message_id: result.messageId,
         status: "sent",
         timestamp: savedMessage.timestamp,
@@ -268,11 +294,23 @@ router.post("/:contactId/template", async (req, res) => {
       });
     }
 
+    let templateMediaUrl = null;
+    if (Array.isArray(components)) {
+      const headerComp = components.find((c) => c?.type?.toLowerCase() === "header");
+      const mediaParam = headerComp?.parameters?.find((p) =>
+        ["image", "video", "document"].includes(p?.type?.toLowerCase())
+      );
+      if (mediaParam) {
+        const typeKey = mediaParam.type.toLowerCase();
+        templateMediaUrl = mediaParam[typeKey]?.link || null;
+      }
+    }
+
     const msgResult = await db.query(
-      `INSERT INTO messages (contact_id, direction, message_body, meta_message_id, status, timestamp)
-       VALUES ($1, 'outbound', $2, $3, 'sent', NOW())
+      `INSERT INTO messages (contact_id, direction, message_body, media_url, meta_message_id, status, timestamp)
+       VALUES ($1, 'outbound', $2, $3, $4, 'sent', NOW())
        RETURNING *`,
-      [contactId, `[Template: ${template_name.trim()}]`, result.messageId]
+      [contactId, `[Template: ${template_name.trim()}]`, templateMediaUrl, result.messageId]
     );
 
     const savedMessage = msgResult.rows[0];
@@ -286,6 +324,7 @@ router.post("/:contactId/template", async (req, res) => {
         contact_name: contact.name,
         direction: "outbound",
         message_body: `[Template: ${template_name.trim()}]`,
+        media_url: templateMediaUrl,
         meta_message_id: result.messageId,
         status: "sent",
         timestamp: savedMessage.timestamp,

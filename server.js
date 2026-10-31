@@ -200,8 +200,10 @@ const { initBullMQ } = require("./services/campaignProcessor");
 const db = require("./db");
 initBullMQ(io);
 
-// Auto-migrate any legacy localhost media URLs in database to production public domain
+// Auto-migrate any legacy localhost media URLs and ensure TEXT capacity
 db.query(`
+  ALTER TABLE messages ALTER COLUMN media_url TYPE TEXT;
+  ALTER TABLE campaigns ALTER COLUMN media_url TYPE TEXT;
   UPDATE media_assets SET media_url = REPLACE(media_url, 'http://localhost:5001', 'https://morihix-wp.piyushassudani.in') WHERE media_url LIKE 'http://localhost:5001%';
   UPDATE campaigns SET media_url = REPLACE(media_url, 'http://localhost:5001', 'https://morihix-wp.piyushassudani.in') WHERE media_url LIKE 'http://localhost:5001%';
   UPDATE messages SET media_url = REPLACE(media_url, 'http://localhost:5001', 'https://morihix-wp.piyushassudani.in') WHERE media_url LIKE 'http://localhost:5001%';

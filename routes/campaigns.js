@@ -183,7 +183,8 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
       resolvedLanguageCode,
       io,
       media_id,
-      media_type
+      media_type,
+      media_url
     );
 
     // Keep history clean: automatically keep the last 100 campaigns
