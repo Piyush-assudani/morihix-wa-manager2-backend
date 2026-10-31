@@ -48,13 +48,13 @@ const initBullMQ = (io) => {
         const { to, templateName, languageCode, campaignId, contactId, mediaId, mediaType, mediaUrl } = job.data;
 
         let components = [];
-        if (mediaId && mediaType) {
+        if (mediaType && (mediaId || mediaUrl)) {
           components.push({
             type: "header",
             parameters: [
               {
                 type: mediaType,
-                [mediaType]: { id: mediaId },
+                [mediaType]: mediaId ? { id: mediaId } : { link: mediaUrl },
               },
             ],
           });
@@ -133,13 +133,13 @@ const processInMemory = async (messages, campaignId, templateName, languageCode,
   const DELAY_MS = 2000; 
 
   let components = [];
-  if (mediaId && mediaType) {
+  if (mediaType && (mediaId || mediaUrl)) {
     components.push({
       type: "header",
       parameters: [
         {
           type: mediaType,
-          [mediaType]: { id: mediaId },
+          [mediaType]: mediaId ? { id: mediaId } : { link: mediaUrl },
         },
       ],
     });

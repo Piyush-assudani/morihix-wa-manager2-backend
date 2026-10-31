@@ -369,7 +369,8 @@ const createTemplate = async (
   headerText = "",
   footerText = "",
   buttons = [],
-  sampleFile = null
+  sampleFile = null,
+  sampleUrl = null
 ) => {
   const { apiBase, token, wabaId } = getMetaConfig();
 
@@ -405,14 +406,39 @@ const createTemplate = async (
           sampleBuffer = await fs.promises.readFile(sampleFile.path);
           sampleMime = sampleFile.mimetype || "image/png";
           sampleName = sampleFile.originalname || "sample";
-        } else if (headerType === "DOCUMENT") {
-          sampleBuffer = DEFAULT_SAMPLE_PDF;
-          sampleMime = "application/pdf";
-          sampleName = "sample.pdf";
-        } else {
-          sampleBuffer = DEFAULT_SAMPLE_PNG;
-          sampleMime = "image/png";
-          sampleName = "sample.png";
+        } else if (sampleUrl && typeof sampleUrl === "string") {
+          try {
+            const normalizedUrl = sampleUrl.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in");
+            const match = normalizedUrl.match(/\/uploads\/([^/]+)\/([^/?#]+)/);
+            if (match) {
+              const localPath = path.join(process.cwd(), "uploads", match[1], match[2]);
+              if (fs.existsSync(localPath)) {
+                sampleBuffer = await fs.promises.readFile(localPath);
+                sampleName = match[2];
+                sampleMime = match[2].endsWith(".png") ? "image/png" : match[2].endsWith(".jpg") || match[2].endsWith(".jpeg") ? "image/jpeg" : "image/png";
+              }
+            }
+            if (!sampleBuffer) {
+              const urlRes = await axios.get(normalizedUrl, { responseType: "arraybuffer", timeout: 15000 });
+              sampleBuffer = Buffer.from(urlRes.data);
+              sampleMime = urlRes.headers["content-type"] || "image/png";
+              sampleName = "sample";
+            }
+          } catch (fetchErr) {
+            console.warn("⚠️ Failed to fetch sampleUrl buffer, falling back to default sample:", fetchErr.message);
+          }
+        }
+
+        if (!sampleBuffer) {
+          if (headerType === "DOCUMENT") {
+            sampleBuffer = DEFAULT_SAMPLE_PDF;
+            sampleMime = "application/pdf";
+            sampleName = "sample.pdf";
+          } else {
+            sampleBuffer = DEFAULT_SAMPLE_PNG;
+            sampleMime = "image/png";
+            sampleName = "sample.png";
+          }
         }
 
         const realHandle = await createSampleMediaHandle(sampleBuffer, sampleMime, sampleName);

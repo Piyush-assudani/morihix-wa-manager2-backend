@@ -92,15 +92,18 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
       console.warn("Could not fetch templates to check params:", err.message);
     }
 
-    if (templateFetched && templateRequiresMediaHeader && !req.file) {
+    const incomingMediaUrl = req.body.media_url || req.body.existing_media_url || null;
+    const incomingMediaId = req.body.media_id || null;
+
+    if (templateFetched && templateRequiresMediaHeader && !req.file && !incomingMediaUrl && !incomingMediaId) {
       return res.status(400).json({
-        error: `Template "${template_name.trim()}" requires a ${requiredHeaderFormat} header. Please attach a ${requiredHeaderFormat} file before launching.`,
+        error: `Template "${template_name.trim()}" requires a ${requiredHeaderFormat} header. Please attach a ${requiredHeaderFormat} file or select from Media Gallery before launching.`,
       });
     }
 
-    let media_id = null;
+    let media_id = incomingMediaId || null;
     let media_type = null;
-    let media_url = null;
+    let media_url = incomingMediaUrl ? incomingMediaUrl.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in") : null;
 
     // Only upload and attach media header if the template actually expects a media header (or if template lookup failed)
     if (req.file && (!templateFetched || templateRequiresMediaHeader)) {
@@ -131,6 +134,8 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
       } catch (uploadErr) {
         console.warn("Media storage upload skipped, proceeding with Meta ID:", uploadErr.message);
       }
+    } else if (incomingMediaUrl) {
+      media_type = (req.body.media_type || (requiredHeaderFormat ? requiredHeaderFormat.toLowerCase() : "image"));
     }
 
     // Fetch distinct members across all chosen contact lists

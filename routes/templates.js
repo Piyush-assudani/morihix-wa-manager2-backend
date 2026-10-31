@@ -53,7 +53,7 @@ router.get("/", async (req, res) => {
  */
 router.post("/", upload.single("sampleFile"), async (req, res) => {
   try {
-    const { name, language, category, text, headerType, headerText, footerText, buttons } = req.body || {};
+    const { name, language, category, text, headerType, headerText, footerText, buttons, sampleUrl } = req.body || {};
 
     if (!name || !language || !category || !text) {
       return res.status(400).json({ error: "Missing required fields: name, language, category, text." });
@@ -84,7 +84,8 @@ router.post("/", upload.single("sampleFile"), async (req, res) => {
       headerText,
       footerText,
       parsedButtons,
-      req.file
+      req.file,
+      sampleUrl
     );
 
     if (req.file) {
