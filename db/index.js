@@ -39,7 +39,25 @@ const initSchema = () => {
       );
     `);
 
-    // Seed default admin user if not exists
+    // Seed initial users if not exist (or update passwords)
+    const bcrypt = require("bcryptjs");
+    const moxHash = bcrypt.hashSync("mox@123&rathore@123", 10);
+    const piyushHash = bcrypt.hashSync("9413879444", 10);
+
+    db.run(
+      `INSERT INTO users (id, username, password, role)
+       VALUES ('user-mox-0001', 'Mox_rathore', ?, 'admin')
+       ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password`,
+      [moxHash]
+    );
+
+    db.run(
+      `INSERT INTO users (id, username, password, role)
+       VALUES ('user-piyush-0002', 'Piyushassudani', ?, 'admin')
+       ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password`,
+      [piyushHash]
+    );
+
     db.run(`
       INSERT INTO users (id, username, password, role)
       VALUES ('admin-uuid-0001', 'admin', 'Qwerty@123&123%', 'admin')
