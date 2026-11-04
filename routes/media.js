@@ -3,7 +3,7 @@ const express = require("express");
 const router = express.Router();
 const multer = require("multer");
 const db = require("../db");
-const { uploadFileToServer, deleteFileFromServer } = require("../services/localStorageService");
+const { uploadFileToServer, deleteFileFromServer, formatMediaUrl } = require("../services/localStorageService");
 const { uploadMediaToMeta } = require("../services/metaApi");
 const os = require("os");
 
@@ -29,7 +29,7 @@ router.get("/", async (req, res) => {
     );
     const rows = result.rows.map(row => ({
       ...row,
-      media_url: row.media_url?.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in") || row.media_url,
+      media_url: formatMediaUrl(row.media_url),
     }));
     res.json(rows);
   } catch (err) {

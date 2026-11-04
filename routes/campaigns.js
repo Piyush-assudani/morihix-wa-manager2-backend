@@ -7,6 +7,7 @@ const { uploadFileToCloudinary } = require("../services/cloudinaryService");
 const os = require("os");
 const path = require("path");
 const { uploadMediaToMeta, getTemplates } = require("../services/metaApi");
+const { formatMediaUrl } = require("../services/localStorageService");
 
 const isValidUuid = (val) =>
   typeof val === "string" &&
@@ -103,7 +104,7 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
 
     let media_id = incomingMediaId || null;
     let media_type = null;
-    let media_url = incomingMediaUrl ? incomingMediaUrl.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in") : null;
+    let media_url = incomingMediaUrl ? formatMediaUrl(incomingMediaUrl) : null;
 
     // Only upload and attach media header if the template actually expects a media header (or if template lookup failed)
     if (req.file && (!templateFetched || templateRequiresMediaHeader)) {
@@ -139,12 +140,13 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
     }
 
     // Fetch distinct members across all chosen contact lists
+    const placeholders = parsedListIds.map((_, i) => `$${i + 1}`).join(", ");
     const membersResult = await db.query(
       `SELECT DISTINCT c.id, c.phone_number, c.name, c.city
        FROM contact_list_members clm
        JOIN contacts c ON clm.contact_id = c.id
-       WHERE clm.list_id = ANY($1::uuid[])`,
-      [parsedListIds]
+       WHERE clm.list_id IN (${placeholders})`,
+      parsedListIds
     );
 
     if (membersResult.rows.length === 0) {
@@ -238,7 +240,7 @@ router.get("/", async (req, res) => {
     );
     const rows = result.rows.map(c => ({
       ...c,
-      media_url: c.media_url?.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in") || c.media_url,
+      media_url: formatMediaUrl(c.media_url),
     }));
     res.json(rows);
   } catch (err) {
@@ -276,7 +278,7 @@ router.get("/:id", async (req, res) => {
 
     const camp = campaignResult.rows[0];
     if (camp && camp.media_url) {
-      camp.media_url = camp.media_url.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in");
+      camp.media_url = formatMediaUrl(camp.media_url);
     }
 
     res.json({

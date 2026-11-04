@@ -29,9 +29,9 @@ router.get("/", async (req, res) => {
         c.phone_number,
         c.name,
         c.created_at,
-        m.message_body as last_message,
-        m.direction as last_message_direction,
-        m.timestamp as last_message_time,
+        (SELECT message_body FROM messages WHERE contact_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_message,
+        (SELECT direction FROM messages WHERE contact_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_message_direction,
+        (SELECT timestamp FROM messages WHERE contact_id = c.id ORDER BY timestamp DESC LIMIT 1) as last_message_time,
         (
           SELECT COUNT(*)
           FROM messages m2
@@ -49,14 +49,7 @@ router.get("/", async (req, res) => {
           LIMIT 1
         ) as last_inbound_time
       FROM contacts c
-      LEFT JOIN LATERAL (
-        SELECT message_body, direction, timestamp
-        FROM messages
-        WHERE contact_id = c.id
-        ORDER BY timestamp DESC NULLS LAST
-        LIMIT 1
-      ) m ON true
-      ORDER BY m.timestamp DESC NULLS LAST`
+      ORDER BY (SELECT timestamp FROM messages WHERE contact_id = c.id ORDER BY timestamp DESC LIMIT 1) DESC`
     );
     res.json(result.rows);
   } catch (err) {

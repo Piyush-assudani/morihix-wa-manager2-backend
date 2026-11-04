@@ -58,101 +58,142 @@ router.post("/", upload.single("file"), async (req, res) => {
     }
 
     if (!req.file || !req.file.buffer) {
-      return res.status(400).json({ error: "Please select an Excel (.xlsx, .xls) or CSV file." });
+      return res.status(400).json({ error: "Please select an Excel (.xlsx, .xls), CSV, or TXT file." });
     }
 
-    let workbook;
-    try {
-      workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-    } catch (parseErr) {
-      return res.status(400).json({ error: "Unable to parse Excel file. The file may be corrupt or encrypted." });
-    }
-
-    if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-      return res.status(400).json({ error: "The uploaded spreadsheet does not contain any sheets." });
-    }
-
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    if (!sheet) {
-      return res.status(400).json({ error: "Spreadsheet sheet is empty or unreadable." });
-    }
+    const originalName = req.file.originalname || "contacts.xlsx";
+    const isTxt = originalName.toLowerCase().endsWith(".txt") || req.file.mimetype === "text/plain";
 
     let fileUrl = null;
     try {
-      const safeFilename = `${Date.now()}-${(req.file.originalname || "contacts.xlsx").replace(/[^a-zA-Z0-9.-]/g, "_")}`;
+      const safeFilename = `${Date.now()}-${originalName.replace(/[^a-zA-Z0-9.-]/g, "_")}`;
       fileUrl = await uploadExcelToSupabase(req.file.buffer, safeFilename);
     } catch (uploadErr) {
-      console.warn("Supabase storage upload skipped/failed:", uploadErr.message);
+      console.warn("Server storage upload notice:", uploadErr.message);
     }
 
-    const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
-    if (!rows || rows.length === 0) {
-      return res.status(400).json({ error: "The uploaded file contains no data rows." });
-    }
+    let contactsToSave = [];
 
-    // Auto-detect header column indices
-    let nameIdx = -1;
-    let phoneIdx = -1;
-    let cityIdx = -1;
-
-    const firstRow = rows[0] || [];
-    firstRow.forEach((cell, idx) => {
-      const val = String(cell || "").toLowerCase().trim();
-      if (/phone|mobile|whatsapp|contact_no|cell|mob|tel/i.test(val) && phoneIdx === -1) {
-        phoneIdx = idx;
-      } else if (/name|customer|client|contact_name|person/i.test(val) && nameIdx === -1) {
-        nameIdx = idx;
-      } else if (/city|location|state|district|address/i.test(val) && cityIdx === -1) {
-        cityIdx = idx;
-      }
-    });
-
-    const startRow = phoneIdx !== -1 || nameIdx !== -1 ? 1 : 0;
-    const contactsToSave = [];
-
-    for (let i = startRow; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || !Array.isArray(row) || row.length === 0) continue;
-
-      let extractedPhone = "";
-      let extractedName = "";
-      let extractedCity = "";
-
-      if (phoneIdx !== -1 && row[phoneIdx] !== undefined) {
-        extractedPhone = String(row[phoneIdx] || "").trim();
-      }
-      if (nameIdx !== -1 && row[nameIdx] !== undefined) {
-        extractedName = String(row[nameIdx] || "").trim();
-      }
-      if (cityIdx !== -1 && row[cityIdx] !== undefined) {
-        extractedCity = String(row[cityIdx] || "").trim();
-      }
-
-      // If phone wasn't detected by header, scan cells for a 10-15 digit string
-      if (!extractedPhone) {
-        for (let col = 0; col < row.length; col++) {
-          const raw = String(row[col] || "").trim();
-          const digits = raw.replace(/\D/g, "");
-          if (digits.length >= 10 && digits.length <= 15) {
+    if (isTxt) {
+      const textContent = req.file.buffer.toString("utf-8");
+      const lines = textContent.split(/\r?\n/);
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const parts = trimmed.split(/[\t,;|]/).map(p => p.trim()).filter(Boolean);
+        let extractedName = "";
+        let extractedPhone = "";
+        let extractedCity = "";
+        for (const p of parts) {
+          const digits = p.replace(/\D/g, "");
+          if (digits.length >= 10 && digits.length <= 15 && !extractedPhone) {
             extractedPhone = digits;
-            if (!extractedName && col > 0 && typeof row[col - 1] === "string") {
-              extractedName = String(row[col - 1]).trim();
-            } else if (!extractedName && col + 1 < row.length && typeof row[col + 1] === "string") {
-              extractedName = String(row[col + 1]).trim();
-            }
-            break;
+          } else if (!extractedName) {
+            extractedName = p;
+          } else if (!extractedCity) {
+            extractedCity = p;
           }
         }
+        if (!extractedPhone) {
+          const digits = trimmed.replace(/\D/g, "");
+          if (digits.length >= 10 && digits.length <= 15) {
+            extractedPhone = digits;
+          }
+        }
+        const cleanPhone = cleanPhoneNumber(extractedPhone);
+        if (cleanPhone.length >= 10 && cleanPhone.length <= 15) {
+          contactsToSave.push({
+            name: (extractedName || `Contact ${cleanPhone.slice(-4)}`).slice(0, 255),
+            phone: cleanPhone,
+            city: (extractedCity || "").slice(0, 255),
+          });
+        }
+      }
+    } else {
+      let workbook;
+      try {
+        workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      } catch (parseErr) {
+        return res.status(400).json({ error: "Unable to parse Excel file. The file may be corrupt or encrypted." });
       }
 
-      const cleanPhone = cleanPhoneNumber(extractedPhone);
-      if (cleanPhone.length >= 10 && cleanPhone.length <= 15) {
-        contactsToSave.push({
-          name: (extractedName || `Contact ${cleanPhone.slice(-4)}`).slice(0, 255),
-          phone: cleanPhone,
-          city: (extractedCity || "").slice(0, 255),
-        });
+      if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+        return res.status(400).json({ error: "The uploaded spreadsheet does not contain any sheets." });
+      }
+
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      if (!sheet) {
+        return res.status(400).json({ error: "Spreadsheet sheet is empty or unreadable." });
+      }
+
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      if (!rows || rows.length === 0) {
+        return res.status(400).json({ error: "The uploaded file contains no data rows." });
+      }
+
+      // Auto-detect header column indices
+      let nameIdx = -1;
+      let phoneIdx = -1;
+      let cityIdx = -1;
+
+      const firstRow = rows[0] || [];
+      firstRow.forEach((cell, idx) => {
+        const val = String(cell || "").toLowerCase().trim();
+        if (/phone|mobile|whatsapp|contact_no|cell|mob|tel/i.test(val) && phoneIdx === -1) {
+          phoneIdx = idx;
+        } else if (/name|customer|client|contact_name|person/i.test(val) && nameIdx === -1) {
+          nameIdx = idx;
+        } else if (/city|location|state|district|address/i.test(val) && cityIdx === -1) {
+          cityIdx = idx;
+        }
+      });
+
+      const startRow = phoneIdx !== -1 || nameIdx !== -1 ? 1 : 0;
+
+      for (let i = startRow; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || !Array.isArray(row) || row.length === 0) continue;
+
+        let extractedPhone = "";
+        let extractedName = "";
+        let extractedCity = "";
+
+        if (phoneIdx !== -1 && row[phoneIdx] !== undefined) {
+          extractedPhone = String(row[phoneIdx] || "").trim();
+        }
+        if (nameIdx !== -1 && row[nameIdx] !== undefined) {
+          extractedName = String(row[nameIdx] || "").trim();
+        }
+        if (cityIdx !== -1 && row[cityIdx] !== undefined) {
+          extractedCity = String(row[cityIdx] || "").trim();
+        }
+
+        // If phone wasn't detected by header, scan cells for a 10-15 digit string
+        if (!extractedPhone) {
+          for (let col = 0; col < row.length; col++) {
+            const raw = String(row[col] || "").trim();
+            const digits = raw.replace(/\D/g, "");
+            if (digits.length >= 10 && digits.length <= 15) {
+              extractedPhone = digits;
+              if (!extractedName && col > 0 && typeof row[col - 1] === "string") {
+                extractedName = String(row[col - 1]).trim();
+              } else if (!extractedName && col + 1 < row.length && typeof row[col + 1] === "string") {
+                extractedName = String(row[col + 1]).trim();
+              }
+              break;
+            }
+          }
+        }
+
+        const cleanPhone = cleanPhoneNumber(extractedPhone);
+        if (cleanPhone.length >= 10 && cleanPhone.length <= 15) {
+          contactsToSave.push({
+            name: (extractedName || `Contact ${cleanPhone.slice(-4)}`).slice(0, 255),
+            phone: cleanPhone,
+            city: (extractedCity || "").slice(0, 255),
+          });
+        }
       }
     }
 

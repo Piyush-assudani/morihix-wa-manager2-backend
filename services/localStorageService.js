@@ -14,15 +14,23 @@ if (!fs.existsSync(UPLOADS_ROOT)) {
  */
 function getBaseUrl() {
   const envUrl = process.env.BASE_URL || process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL;
-  if (envUrl && envUrl.trim() !== "" && !envUrl.includes("localhost") && !envUrl.includes("127.0.0.1")) {
+  if (envUrl && envUrl.trim() !== "") {
     return envUrl.trim().replace(/\/+$/, "");
-  }
-  // If deployed or configured with WhatsApp API, use the live public domain
-  if (process.env.NODE_ENV === "production" || process.env.WHATSAPP_PHONE_NUMBER_ID) {
-    return "https://morihix-wp.piyushassudani.in";
   }
   const port = process.env.PORT || 5001;
   return `http://localhost:${port}`;
+}
+
+/**
+ * Formats a media URL, replacing localhost with the public base URL if configured.
+ */
+function formatMediaUrl(url) {
+  if (!url || typeof url !== "string") return url;
+  const baseUrl = getBaseUrl();
+  if (baseUrl && !baseUrl.includes("localhost") && !baseUrl.includes("127.0.0.1")) {
+    return url.replace(/http:\/\/(localhost|127\.0\.0\.1):\d+/g, baseUrl);
+  }
+  return url;
 }
 
 /**
@@ -107,4 +115,5 @@ module.exports = {
   deleteFileFromServer,
   UPLOADS_ROOT,
   getBaseUrl,
+  formatMediaUrl,
 };

@@ -1,4 +1,4 @@
--- Morihix Digital Database Schema
+-- Morihix WA Manager Database Schema
 -- Run with: npm run migrate
 
 -- Enable UUID extension

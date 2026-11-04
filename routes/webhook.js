@@ -19,7 +19,8 @@ router.get("/", (req, res) => {
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === process.env.WEBHOOK_VERIFY_TOKEN) {
+  const expectedToken = process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.WEBHOOK_VERIFY_TOKEN;
+  if (mode === "subscribe" && token === expectedToken) {
     console.log("✅ Webhook verified successfully");
     return res.status(200).send(challenge);
   }
@@ -150,11 +151,15 @@ router.post("/", async (req, res) => {
               const contact = contactResult.rows[0];
 
               // Save the message
+              const messageTimestamp = timestamp
+                ? new Date(Number(timestamp) * 1000).toISOString()
+                : new Date().toISOString();
+
               const msgResult = await db.query(
                 `INSERT INTO messages (contact_id, direction, message_body, media_url, meta_message_id, status, timestamp)
-                 VALUES ($1, 'inbound', $2, $3, $4, 'delivered', to_timestamp($5::numeric))
+                 VALUES ($1, 'inbound', $2, $3, $4, 'delivered', $5)
                  RETURNING *`,
-                [contact.id, messageBody, mediaUrl, wamid, timestamp]
+                [contact.id, messageBody, mediaUrl, wamid, messageTimestamp]
               );
 
               const savedMessage = msgResult.rows[0];

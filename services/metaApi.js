@@ -8,11 +8,11 @@ const FormData = require("form-data");
  * Returns dynamic Meta configuration from environment variables
  */
 const getMetaConfig = () => {
-  const version = process.env.META_API_VERSION || "v17.0";
+  const version = process.env.META_GRAPH_API_VERSION || process.env.META_API_VERSION || "v20.0";
   const apiBase = `https://graph.facebook.com/${version}`;
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const token = process.env.META_ACCESS_TOKEN;
-  const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+  const phoneId = process.env.META_PHONE_ID || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const token = process.env.META_WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN;
+  const wabaId = process.env.META_WABA_ID || process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
   return { apiBase, phoneId, token, wabaId };
 };
 
@@ -408,7 +408,7 @@ const createTemplate = async (
           sampleName = sampleFile.originalname || "sample";
         } else if (sampleUrl && typeof sampleUrl === "string") {
           try {
-            const normalizedUrl = sampleUrl.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in");
+            const normalizedUrl = sampleUrl;
             const match = normalizedUrl.match(/\/uploads\/([^/]+)\/([^/?#]+)/);
             if (match) {
               const localPath = path.join(process.cwd(), "uploads", match[1], match[2]);

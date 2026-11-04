@@ -4,6 +4,7 @@ const fs = require("fs");
 const db = require("../db");
 const { sendTextMessage, sendTemplateMessage, sendMediaMessage, sendMediaById, uploadMediaToMeta } = require("../services/metaApi");
 const { uploadFileToCloudinary } = require("../services/cloudinaryService");
+const { formatMediaUrl } = require("../services/localStorageService");
 const multer = require("multer");
 const os = require("os");
 
@@ -100,7 +101,7 @@ router.get("/:contactId", async (req, res) => {
 
     const normalizedMessages = messagesResult.rows.map(m => ({
       ...m,
-      media_url: m.media_url?.replace(/http:\/\/localhost:\d+/g, "https://morihix-wp.piyushassudani.in") || m.media_url,
+      media_url: formatMediaUrl(m.media_url),
     }));
 
     res.json({

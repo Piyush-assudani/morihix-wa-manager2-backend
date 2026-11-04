@@ -1,6 +1,6 @@
-# Morihix Digital Backend
+# Morihix WA Manager Backend
 
-This is the high-performance backend service for Morihix Digital. It provides RESTful APIs, real-time Socket.IO events, and webhook handling for managing WhatsApp campaigns, contacts, media, and real-time messaging using the official WhatsApp Cloud API.
+This is the high-performance backend service for Morihix WA Manager. It provides RESTful APIs, real-time Socket.IO events, and webhook handling for managing WhatsApp campaigns, contacts, media, and real-time messaging using the official WhatsApp Cloud API.
 
 ## Features
 

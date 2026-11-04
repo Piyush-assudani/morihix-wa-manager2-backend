@@ -10,16 +10,15 @@ const HEALTH_CACHE_TTL = 30 * 1000;
 router.get("/health", (req, res) => {
   res.json({
     status: "ok",
-    app: "Morihix Digital",
-    app: "Morihix Digital",
+    app: "Morihix WA Manager",
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
 });
 
 router.get("/account-health", async (req, res) => {
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const accessToken = process.env.META_ACCESS_TOKEN;
+  const phoneId = process.env.META_PHONE_ID || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const accessToken = process.env.META_WHATSAPP_TOKEN || process.env.META_ACCESS_TOKEN;
 
   if (!phoneId || !accessToken) {
     return res.json({
