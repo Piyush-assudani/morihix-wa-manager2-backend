@@ -71,7 +71,7 @@ const initSchema = () => {
         phone_number TEXT UNIQUE NOT NULL,
         name TEXT,
         city TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
     `);
 
@@ -81,7 +81,7 @@ const initSchema = () => {
         id TEXT PRIMARY KEY DEFAULT ${UUID_GEN},
         name TEXT NOT NULL,
         file_url TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
     `);
 
@@ -105,7 +105,7 @@ const initSchema = () => {
         media_type TEXT,
         media_url TEXT,
         total_sent INTEGER DEFAULT 0,
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
     `);
 
@@ -121,7 +121,7 @@ const initSchema = () => {
         meta_message_id TEXT,
         status TEXT DEFAULT 'sent',
         error_message TEXT,
-        timestamp TEXT DEFAULT (datetime('now'))
+        timestamp TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
     `);
 
@@ -133,7 +133,7 @@ const initSchema = () => {
         media_url TEXT NOT NULL,
         meta_media_id TEXT,
         resource_type TEXT DEFAULT 'image',
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
     `);
 
@@ -142,7 +142,7 @@ const initSchema = () => {
       CREATE TABLE IF NOT EXISTS webhook_logs (
         id TEXT PRIMARY KEY DEFAULT ${UUID_GEN},
         payload TEXT,
-        created_at TEXT DEFAULT (datetime('now'))
+        created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
     `);
 
@@ -178,6 +178,22 @@ const initSchema = () => {
         }
       }
     );
+
+    // 10. Auto-migrate existing timestamps to standard ISO-8601 UTC (YYYY-MM-DDTHH:MM:SSZ)
+    db.run(
+      `UPDATE messages 
+       SET timestamp = replace(timestamp, ' ', 'T') || 'Z'
+       WHERE timestamp IS NOT NULL 
+         AND timestamp NOT LIKE '%Z' 
+         AND timestamp LIKE '____-__-__ __:__:__%'`
+    );
+    db.run(
+      `UPDATE contacts 
+       SET created_at = replace(created_at, ' ', 'T') || 'Z'
+       WHERE created_at IS NOT NULL 
+         AND created_at NOT LIKE '%Z' 
+         AND created_at LIKE '____-__-__ __:__:__%'`
+    );
   });
 };
 
@@ -190,7 +206,7 @@ initSchema();
 const query = (text, params = []) => {
   return new Promise((resolve, reject) => {
     let cleanText = text
-      .replace(/\bNOW\(\)/gi, "datetime('now')")
+      .replace(/\bNOW\(\)/gi, "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
       .replace(/\bILIKE\b/gi, "LIKE")
       .trim();
 
