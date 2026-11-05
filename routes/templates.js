@@ -53,7 +53,19 @@ router.get("/", async (req, res) => {
  */
 router.post("/", upload.single("sampleFile"), async (req, res) => {
   try {
-    const { name, language, category, text, headerType, headerText, footerText, buttons, sampleUrl } = req.body || {};
+    const {
+      name,
+      language,
+      category,
+      text,
+      headerType,
+      headerText,
+      footerText,
+      buttons,
+      sampleUrl,
+      bodyExamples,
+      headerExample,
+    } = req.body || {};
 
     if (!name || !language || !category || !text) {
       return res.status(400).json({ error: "Missing required fields: name, language, category, text." });
@@ -75,6 +87,15 @@ router.post("/", upload.single("sampleFile"), async (req, res) => {
       }
     }
 
+    let parsedBodyExamples = [];
+    if (bodyExamples) {
+      try {
+        parsedBodyExamples = typeof bodyExamples === "string" ? JSON.parse(bodyExamples) : bodyExamples;
+      } catch (e) {
+        parsedBodyExamples = [bodyExamples];
+      }
+    }
+
     const result = await createTemplate(
       cleanName,
       language,
@@ -85,7 +106,9 @@ router.post("/", upload.single("sampleFile"), async (req, res) => {
       footerText,
       parsedButtons,
       req.file,
-      sampleUrl
+      sampleUrl,
+      parsedBodyExamples,
+      headerExample
     );
 
     if (req.file) {

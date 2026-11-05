@@ -370,7 +370,9 @@ const createTemplate = async (
   footerText = "",
   buttons = [],
   sampleFile = null,
-  sampleUrl = null
+  sampleUrl = null,
+  bodyExamples = [],
+  headerExample = ""
 ) => {
   const { apiBase, token, wabaId } = getMetaConfig();
 
@@ -379,20 +381,44 @@ const createTemplate = async (
   }
 
   try {
-    const components = [
-      {
-        type: "BODY",
-        text: text,
-      },
-    ];
+    const bodyMatches = text.match(/\{\{\d+\}\}/g);
+    const bodyComponent = {
+      type: "BODY",
+      text: text,
+    };
+
+    if (bodyMatches && bodyMatches.length > 0) {
+      const uniqueVars = Array.from(new Set(bodyMatches));
+      let sampleList = [];
+      if (Array.isArray(bodyExamples) && bodyExamples.length > 0) {
+        sampleList = bodyExamples.slice(0, uniqueVars.length);
+        for (let i = sampleList.length; i < uniqueVars.length; i++) {
+          sampleList.push(`Sample ${i + 1}`);
+        }
+      } else {
+        sampleList = uniqueVars.map((_, i) => `Sample ${i + 1}`);
+      }
+      bodyComponent.example = {
+        body_text: [sampleList],
+      };
+    }
+
+    const components = [bodyComponent];
 
     if (headerType && headerType !== "NONE") {
       if (headerType === "TEXT" && headerText) {
-        components.unshift({
+        const headerMatches = headerText.match(/\{\{\d+\}\}/g);
+        const headerComponent = {
           type: "HEADER",
           format: "TEXT",
           text: headerText,
-        });
+        };
+        if (headerMatches && headerMatches.length > 0) {
+          headerComponent.example = {
+            header_text: [headerExample || "Sample Header"],
+          };
+        }
+        components.unshift(headerComponent);
       } else if (["IMAGE", "VIDEO", "DOCUMENT"].includes(headerType)) {
         let sampleBuffer = null;
         let sampleMime = "image/png";
@@ -453,10 +479,10 @@ const createTemplate = async (
       }
     }
 
-    if (footerText) {
+    if (footerText && footerText.trim()) {
       components.push({
         type: "FOOTER",
-        text: footerText,
+        text: footerText.trim(),
       });
     }
 
@@ -466,11 +492,17 @@ const createTemplate = async (
         buttons: buttons
           .map((btn) => {
             if (btn.type === "QUICK_REPLY") {
-              return { type: "QUICK_REPLY", text: btn.text };
+              return { type: "QUICK_REPLY", text: String(btn.text).slice(0, 25) };
             } else if (btn.type === "URL") {
-              return { type: "URL", text: btn.text, url: btn.url };
+              const urlObj = { type: "URL", text: String(btn.text).slice(0, 25), url: btn.url };
+              if (btn.url?.includes("{{1}}") && btn.urlExample) {
+                urlObj.example = [btn.urlExample];
+              }
+              return urlObj;
             } else if (btn.type === "PHONE_NUMBER") {
-              return { type: "PHONE_NUMBER", text: btn.text, phone_number: btn.phone_number };
+              return { type: "PHONE_NUMBER", text: String(btn.text).slice(0, 25), phone_number: btn.phone_number };
+            } else if (btn.type === "COPY_CODE") {
+              return { type: "COPY_CODE", example: btn.code || btn.example || "PROMO2026" };
             }
             return null;
           })
