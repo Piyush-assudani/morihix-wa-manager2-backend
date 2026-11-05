@@ -6,6 +6,7 @@ const { sendTextMessage, sendTemplateMessage, sendMediaMessage, sendMediaById, u
 const { uploadFileToCloudinary } = require("../services/cloudinaryService");
 const { formatMediaUrl } = require("../services/localStorageService");
 const { cleanPhoneNumber } = require("../utils/phone");
+const { formatMetaError } = require("../utils/metaErrors");
 const multer = require("multer");
 const os = require("os");
 
@@ -460,6 +461,113 @@ router.post("/:contactId/media", upload.single("file"), async (req, res) => {
   } catch (err) {
     console.error("❌ Send media error:", err);
     res.status(500).json({ error: "Failed to process and send media file." });
+  }
+});
+
+/**
+ * POST /api/messages/:messageId/retry
+ * Retry sending a failed message
+ */
+router.post("/:messageId/retry", async (req, res) => {
+  try {
+    const { messageId } = req.params;
+
+    if (!isValidUuid(messageId)) {
+      return res.status(400).json({ error: "Invalid message ID format." });
+    }
+
+    const msgResult = await db.query(
+      `SELECT m.*, c.phone_number, c.name, c.city
+       FROM messages m
+       JOIN contacts c ON m.contact_id = c.id
+       WHERE m.id = $1`,
+      [messageId]
+    );
+
+    if (msgResult.rows.length === 0) {
+      return res.status(404).json({ error: "Message not found." });
+    }
+
+    const msg = msgResult.rows[0];
+
+    if (msg.direction !== "outbound") {
+      return res.status(400).json({ error: "Only outbound messages can be retried." });
+    }
+
+    const validPhone = cleanPhoneNumber(msg.phone_number);
+    let result;
+
+    if (msg.message_body?.startsWith("[Template:")) {
+      const match = msg.message_body.match(/^\[Template:\s*([^\]]+)\]/);
+      const templateName = match ? match[1].trim() : "";
+      
+      let components = [];
+      if (msg.media_url) {
+        components.push({
+          type: "header",
+          parameters: [{ type: "image", image: { link: msg.media_url } }]
+        });
+      }
+
+      result = await sendTemplateMessage(validPhone, templateName, "en_US", components);
+    } else if (msg.media_url) {
+      const url = msg.media_url.toLowerCase();
+      let type = "image";
+      if (url.match(/\.(mp4|webm|mov)$/) || url.includes("video/upload")) type = "video";
+      else if (url.match(/\.(mp3|wav|ogg|aac|m4a)$/) || url.includes("audio")) type = "audio";
+      else if (url.match(/\.(pdf|doc|docx|xls|xlsx|csv|txt)$/) || url.includes("raw/upload")) type = "document";
+
+      result = await sendMediaMessage(validPhone, msg.media_url, type);
+    } else {
+      result = await sendTextMessage(validPhone, msg.message_body);
+    }
+
+    if (!result.success) {
+      const errorMsg = formatMetaError(result.error);
+      await db.query(
+        `UPDATE messages SET status = 'failed', error_message = $1 WHERE id = $2`,
+        [errorMsg, messageId]
+      );
+
+      const io = req.app.get("io");
+      if (io) {
+        io.emit("message_status", {
+          id: messageId,
+          meta_message_id: msg.meta_message_id,
+          status: "failed",
+          recipient: validPhone,
+          error_message: errorMsg,
+        });
+      }
+
+      return res.status(502).json({ error: errorMsg });
+    }
+
+    const updateResult = await db.query(
+      `UPDATE messages
+       SET status = 'sent', meta_message_id = $1, error_message = NULL, timestamp = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+       WHERE id = $2
+       RETURNING *`,
+      [result.messageId, messageId]
+    );
+
+    const updatedMsg = updateResult.rows[0];
+
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("message_status", {
+        id: messageId,
+        meta_message_id: result.messageId,
+        status: "sent",
+        recipient: validPhone,
+        error_message: null,
+      });
+    }
+
+    res.json(updatedMsg);
+  } catch (err) {
+    console.error("❌ Retry message error:", err);
+    res.status(500).json({ error: "Failed to retry sending message." });
   }
 });
 

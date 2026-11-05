@@ -1,6 +1,7 @@
 const db = require("../db");
 const { sendTemplateMessage } = require("./metaApi");
 const { cleanPhoneNumber } = require("../utils/phone");
+const { formatMetaError } = require("../utils/metaErrors");
 
 let bullmqAvailable = false;
 let Queue, Worker;
@@ -80,7 +81,7 @@ const initBullMQ = (io) => {
             mediaUrl || null,
             result.messageId || null,
             result.success ? "sent" : "failed",
-            result.success ? null : (result.error || "Failed to send template message via Meta API"),
+            result.success ? null : formatMetaError(result.error),
           ]
         );
 
@@ -170,7 +171,7 @@ const processInMemory = async (messages, campaignId, templateName, languageCode,
           mediaUrl || null,
           result.messageId || null,
           result.success ? "sent" : "failed",
-          result.success ? null : (result.error || "Failed to send template message via Meta API"),
+          result.success ? null : formatMetaError(result.error),
         ]
       );
 

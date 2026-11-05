@@ -6,9 +6,10 @@ const { processCampaign } = require("../services/campaignProcessor");
 const { uploadFileToCloudinary } = require("../services/cloudinaryService");
 const os = require("os");
 const path = require("path");
-const { uploadMediaToMeta, getTemplates } = require("../services/metaApi");
+const { uploadMediaToMeta, getTemplates, sendTemplateMessage } = require("../services/metaApi");
 const { formatMediaUrl } = require("../services/localStorageService");
 const { cleanPhoneNumber } = require("../utils/phone");
+const { formatMetaError } = require("../utils/metaErrors");
 
 const isValidUuid = (val) =>
   typeof val === "string" &&
@@ -316,6 +317,262 @@ router.get("/:id/recipients", async (req, res) => {
   } catch (err) {
     console.error("❌ Campaign recipients error:", err);
     res.status(500).json({ error: "Failed to fetch campaign recipient list." });
+  }
+});
+
+/**
+ * POST /api/campaigns/:id/retry-failed
+ * Retry all failed messages in a campaign
+ */
+router.post("/:id/retry-failed", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!isValidUuid(id)) {
+      return res.status(400).json({ error: "Invalid campaign ID format." });
+    }
+
+    const campResult = await db.query(`SELECT * FROM campaigns WHERE id = $1`, [id]);
+    if (campResult.rows.length === 0) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+    const campaign = campResult.rows[0];
+
+    const failedMessages = await db.query(
+      `SELECT m.id, m.contact_id, c.phone_number, c.name, c.city
+       FROM messages m
+       JOIN contacts c ON m.contact_id = c.id
+       WHERE m.campaign_id = $1 AND m.status = 'failed'`,
+      [id]
+    );
+
+    if (failedMessages.rows.length === 0) {
+      return res.json({ message: "No failed messages found to retry.", total: 0, succeeded: 0, failed: 0 });
+    }
+
+    let paramCount = 0;
+    let resolvedLanguageCode = "en_US";
+    try {
+      const templates = await getTemplates();
+      const tpl = (templates || []).find((t) => t.name === campaign.template_name);
+      if (tpl) {
+        if (tpl.language) resolvedLanguageCode = tpl.language;
+        const bodyComp = tpl.components?.find((c) => c.type === "BODY");
+        if (bodyComp && bodyComp.text) {
+          const matches = bodyComp.text.match(/\{\{\d+\}\}/g);
+          if (matches) paramCount = new Set(matches).size;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch template details during retry:", e.message);
+    }
+
+    let headerComponents = [];
+    if (campaign.media_type && (campaign.media_id || campaign.media_url)) {
+      headerComponents.push({
+        type: "header",
+        parameters: [
+          {
+            type: campaign.media_type,
+            [campaign.media_type]: campaign.media_id ? { id: campaign.media_id } : { link: campaign.media_url },
+          },
+        ],
+      });
+    }
+
+    const io = req.app.get("io");
+    let succeededCount = 0;
+    let stillFailedCount = 0;
+
+    for (const msg of failedMessages.rows) {
+      const validPhone = cleanPhoneNumber(msg.phone_number);
+      let components = [...headerComponents];
+
+      const bodyParams = [];
+      if (paramCount >= 1) bodyParams.push({ type: "text", text: msg.name || "Customer" });
+      if (paramCount >= 2) bodyParams.push({ type: "text", text: msg.city || "Valued Client" });
+      for (let i = 2; i < paramCount; i++) bodyParams.push({ type: "text", text: "Update" });
+
+      if (bodyParams.length > 0) {
+        components.push({ type: "body", parameters: bodyParams });
+      }
+
+      const result = await sendTemplateMessage(validPhone, campaign.template_name, resolvedLanguageCode, components);
+
+      if (result.success) {
+        succeededCount++;
+        await db.query(
+          `UPDATE messages
+           SET status = 'sent', meta_message_id = $1, error_message = NULL, timestamp = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           WHERE id = $2`,
+          [result.messageId, msg.id]
+        );
+
+        if (io) {
+          io.emit("message_status", {
+            id: msg.id,
+            campaign_id: id,
+            meta_message_id: result.messageId,
+            status: "sent",
+            recipient: validPhone,
+            error_message: null,
+          });
+        }
+      } else {
+        stillFailedCount++;
+        const formattedErr = formatMetaError(result.error);
+        await db.query(
+          `UPDATE messages
+           SET error_message = $1, timestamp = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+           WHERE id = $2`,
+          [formattedErr, msg.id]
+        );
+
+        if (io) {
+          io.emit("message_status", {
+            id: msg.id,
+            campaign_id: id,
+            status: "failed",
+            recipient: validPhone,
+            error_message: formattedErr,
+          });
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 300));
+    }
+
+    res.json({
+      success: true,
+      total: failedMessages.rows.length,
+      succeeded: succeededCount,
+      failed: stillFailedCount,
+    });
+  } catch (err) {
+    console.error("❌ Retry failed messages error:", err);
+    res.status(500).json({ error: "Failed to retry campaign messages." });
+  }
+});
+
+/**
+ * POST /api/campaigns/:id/retry/:messageId
+ * Retry a single recipient in a campaign
+ */
+router.post("/:id/retry/:messageId", async (req, res) => {
+  try {
+    const { id, messageId } = req.params;
+
+    if (!isValidUuid(id) || !isValidUuid(messageId)) {
+      return res.status(400).json({ error: "Invalid ID format." });
+    }
+
+    const campResult = await db.query(`SELECT * FROM campaigns WHERE id = $1`, [id]);
+    if (campResult.rows.length === 0) {
+      return res.status(404).json({ error: "Campaign not found" });
+    }
+    const campaign = campResult.rows[0];
+
+    const msgResult = await db.query(
+      `SELECT m.id, m.contact_id, c.phone_number, c.name, c.city
+       FROM messages m
+       JOIN contacts c ON m.contact_id = c.id
+       WHERE m.id = $1 AND m.campaign_id = $2`,
+      [messageId, id]
+    );
+
+    if (msgResult.rows.length === 0) {
+      return res.status(404).json({ error: "Message not found in this campaign." });
+    }
+
+    const msg = msgResult.rows[0];
+    const validPhone = cleanPhoneNumber(msg.phone_number);
+
+    let paramCount = 0;
+    let resolvedLanguageCode = "en_US";
+    try {
+      const templates = await getTemplates();
+      const tpl = (templates || []).find((t) => t.name === campaign.template_name);
+      if (tpl) {
+        if (tpl.language) resolvedLanguageCode = tpl.language;
+        const bodyComp = tpl.components?.find((c) => c.type === "BODY");
+        if (bodyComp && bodyComp.text) {
+          const matches = bodyComp.text.match(/\{\{\d+\}\}/g);
+          if (matches) paramCount = new Set(matches).size;
+        }
+      }
+    } catch (e) {
+      console.warn("Could not fetch template details during retry:", e.message);
+    }
+
+    let components = [];
+    if (campaign.media_type && (campaign.media_id || campaign.media_url)) {
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: campaign.media_type,
+            [campaign.media_type]: campaign.media_id ? { id: campaign.media_id } : { link: campaign.media_url },
+          },
+        ],
+      });
+    }
+
+    const bodyParams = [];
+    if (paramCount >= 1) bodyParams.push({ type: "text", text: msg.name || "Customer" });
+    if (paramCount >= 2) bodyParams.push({ type: "text", text: msg.city || "Valued Client" });
+    for (let i = 2; i < paramCount; i++) bodyParams.push({ type: "text", text: "Update" });
+
+    if (bodyParams.length > 0) {
+      components.push({ type: "body", parameters: bodyParams });
+    }
+
+    const result = await sendTemplateMessage(validPhone, campaign.template_name, resolvedLanguageCode, components);
+    const io = req.app.get("io");
+
+    if (result.success) {
+      await db.query(
+        `UPDATE messages
+         SET status = 'sent', meta_message_id = $1, error_message = NULL, timestamp = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         WHERE id = $2`,
+        [result.messageId, messageId]
+      );
+
+      if (io) {
+        io.emit("message_status", {
+          id: messageId,
+          campaign_id: id,
+          meta_message_id: result.messageId,
+          status: "sent",
+          recipient: validPhone,
+          error_message: null,
+        });
+      }
+
+      return res.json({ success: true, status: "sent", meta_message_id: result.messageId });
+    } else {
+      const formattedErr = formatMetaError(result.error);
+      await db.query(
+        `UPDATE messages
+         SET error_message = $1, timestamp = (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+         WHERE id = $2`,
+        [formattedErr, messageId]
+      );
+
+      if (io) {
+        io.emit("message_status", {
+          id: messageId,
+          campaign_id: id,
+          status: "failed",
+          recipient: validPhone,
+          error_message: formattedErr,
+        });
+      }
+
+      return res.status(502).json({ error: formattedErr });
+    }
+  } catch (err) {
+    console.error("❌ Retry single campaign message error:", err);
+    res.status(500).json({ error: "Failed to retry recipient message." });
   }
 });
 

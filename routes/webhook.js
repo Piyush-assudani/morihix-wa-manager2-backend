@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require("../db");
 const { downloadMediaFromMeta } = require("../services/metaApi");
 const { uploadBufferToCloudinary } = require("../services/cloudinaryService");
+const { formatMetaError } = require("../utils/metaErrors");
 
 // Status hierarchy — higher number = more progressed
 const STATUS_PRIORITY = {
@@ -204,7 +205,7 @@ router.post("/", async (req, res) => {
               // Only upgrade status, never downgrade
               // e.g., don't go from "read" back to "delivered"
               const existing = await db.query(
-                `SELECT status FROM messages WHERE meta_message_id = $1`,
+                `SELECT id, status, campaign_id FROM messages WHERE meta_message_id = $1`,
                 [metaMessageId]
               );
 
@@ -213,7 +214,8 @@ router.post("/", async (req, res) => {
                 continue;
               }
 
-              const currentStatus = existing.rows[0].status;
+              const existingMsg = existing.rows[0];
+              const currentStatus = existingMsg.status;
               const currentPriority = STATUS_PRIORITY[currentStatus] ?? -1;
               const newPriority = STATUS_PRIORITY[newStatus] ?? -1;
 
@@ -227,9 +229,7 @@ router.post("/", async (req, res) => {
               let errorMsg = null;
               if (newStatus === "failed" && status.errors && status.errors.length > 0) {
                 const errObj = status.errors[0];
-                const details = errObj.error_data?.details;
-                const baseMsg = errObj.message || errObj.title || "Unknown error";
-                errorMsg = details ? `${baseMsg} (${details})` : baseMsg;
+                errorMsg = formatMetaError(errObj);
               }
 
               await db.query(
@@ -239,13 +239,16 @@ router.post("/", async (req, res) => {
 
               console.log(`📊 Status updated: ${currentStatus} → ${newStatus} for ${recipientId} (${metaMessageId})${errorMsg ? ` [${errorMsg}]` : ''}`);
 
-              // Emit via Socket.IO for real-time tick updates
+              // Emit via Socket.IO for real-time tick updates across chat & campaigns
               const io = req.app.get("io");
               if (io) {
                 io.emit("message_status", {
+                  id: existingMsg.id,
+                  campaign_id: existingMsg.campaign_id,
                   meta_message_id: metaMessageId,
                   status: newStatus,
                   recipient: recipientId,
+                  error_message: errorMsg,
                 });
               }
             } catch (statusErr) {
