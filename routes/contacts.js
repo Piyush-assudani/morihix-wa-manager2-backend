@@ -1,21 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const db = require("../db");
+const { cleanPhoneNumber } = require("../utils/phone");
 
 const isValidUuid = (val) =>
   typeof val === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
-
-const cleanPhoneNumber = (raw) => {
-  if (!raw) return "";
-  let digits = String(raw).replace(/\D/g, "");
-  if (digits.startsWith("0") && digits.length === 11) {
-    digits = "91" + digits.slice(1);
-  } else if (digits.length === 10) {
-    digits = "91" + digits;
-  }
-  return digits;
-};
 
 /**
  * GET /api/contacts

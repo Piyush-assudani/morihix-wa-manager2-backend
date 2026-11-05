@@ -4,21 +4,11 @@ const multer = require("multer");
 const XLSX = require("xlsx");
 const db = require("../db");
 const { uploadExcelToSupabase } = require("../services/supabaseService");
+const { cleanPhoneNumber } = require("../utils/phone");
 
 const isValidUuid = (val) =>
   typeof val === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val);
-
-const cleanPhoneNumber = (raw) => {
-  if (!raw) return "";
-  let digits = String(raw).replace(/\D/g, "");
-  if (digits.startsWith("0") && digits.length === 11) {
-    digits = "91" + digits.slice(1);
-  } else if (digits.length === 10) {
-    digits = "91" + digits;
-  }
-  return digits;
-};
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -85,9 +75,9 @@ router.post("/", upload.single("file"), async (req, res) => {
         let extractedPhone = "";
         let extractedCity = "";
         for (const p of parts) {
-          const digits = p.replace(/\D/g, "");
-          if (digits.length >= 10 && digits.length <= 15 && !extractedPhone) {
-            extractedPhone = digits;
+          const cleaned = cleanPhoneNumber(p);
+          if (cleaned.length >= 10 && cleaned.length <= 15 && !extractedPhone) {
+            extractedPhone = cleaned;
           } else if (!extractedName) {
             extractedName = p;
           } else if (!extractedCity) {
@@ -95,9 +85,9 @@ router.post("/", upload.single("file"), async (req, res) => {
           }
         }
         if (!extractedPhone) {
-          const digits = trimmed.replace(/\D/g, "");
-          if (digits.length >= 10 && digits.length <= 15) {
-            extractedPhone = digits;
+          const cleaned = cleanPhoneNumber(trimmed);
+          if (cleaned.length >= 10 && cleaned.length <= 15) {
+            extractedPhone = cleaned;
           }
         }
         const cleanPhone = cleanPhoneNumber(extractedPhone);
@@ -169,13 +159,13 @@ router.post("/", upload.single("file"), async (req, res) => {
           extractedCity = String(row[cityIdx] || "").trim();
         }
 
-        // If phone wasn't detected by header, scan cells for a 10-15 digit string
+        // If phone wasn't detected by header, scan cells for a valid phone number
         if (!extractedPhone) {
           for (let col = 0; col < row.length; col++) {
             const raw = String(row[col] || "").trim();
-            const digits = raw.replace(/\D/g, "");
-            if (digits.length >= 10 && digits.length <= 15) {
-              extractedPhone = digits;
+            const cleaned = cleanPhoneNumber(raw);
+            if (cleaned.length >= 10 && cleaned.length <= 15) {
+              extractedPhone = cleaned;
               if (!extractedName && col > 0 && typeof row[col - 1] === "string") {
                 extractedName = String(row[col - 1]).trim();
               } else if (!extractedName && col + 1 < row.length && typeof row[col + 1] === "string") {
