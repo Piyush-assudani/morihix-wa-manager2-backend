@@ -5,6 +5,7 @@ const db = require("../db");
 const { sendTextMessage, sendTemplateMessage, sendMediaMessage, sendMediaById, uploadMediaToMeta } = require("../services/metaApi");
 const { uploadFileToCloudinary } = require("../services/cloudinaryService");
 const { formatMediaUrl } = require("../services/localStorageService");
+const { cleanPhoneNumber } = require("../utils/phone");
 const multer = require("multer");
 const os = require("os");
 
@@ -208,11 +209,12 @@ router.post("/:contactId", async (req, res) => {
     const trimmedMessage = typeof message === "string" ? message.trim() : "";
     const isImage = isImageUrl(trimmedMessage);
 
+    const validPhone = cleanPhoneNumber(contact.phone_number);
     let result;
     if (isImage) {
-      result = await sendMediaMessage(contact.phone_number, trimmedMessage, "image");
+      result = await sendMediaMessage(validPhone, trimmedMessage, "image");
     } else {
-      result = await sendTextMessage(contact.phone_number, message);
+      result = await sendTextMessage(validPhone, message);
     }
 
     if (!result.success) {
@@ -282,7 +284,7 @@ router.post("/:contactId/template", async (req, res) => {
     const contact = contactResult.rows[0];
 
     const result = await sendTemplateMessage(
-      contact.phone_number,
+      cleanPhoneNumber(contact.phone_number),
       template_name.trim(),
       language_code,
       Array.isArray(components) ? components : []
@@ -416,11 +418,12 @@ router.post("/:contactId/media", upload.single("file"), async (req, res) => {
     fs.promises.unlink(req.file.path).catch(() => {});
 
     // 4. Send via Meta API (prefer Meta Media ID for reliability, fallback to public mediaUrl)
+    const validPhone = cleanPhoneNumber(contact.phone_number);
     let result;
     if (metaMediaId) {
-      result = await sendMediaById(contact.phone_number, metaMediaId, metaType);
+      result = await sendMediaById(validPhone, metaMediaId, metaType);
     } else {
-      result = await sendMediaMessage(contact.phone_number, mediaUrl, metaType);
+      result = await sendMediaMessage(validPhone, mediaUrl, metaType);
     }
 
     if (!result.success) {

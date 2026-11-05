@@ -1,5 +1,6 @@
 const db = require("../db");
 const { sendTemplateMessage } = require("./metaApi");
+const { cleanPhoneNumber } = require("../utils/phone");
 
 let bullmqAvailable = false;
 let Queue, Worker;
@@ -67,7 +68,7 @@ const initBullMQ = (io) => {
           });
         }
 
-        const result = await sendTemplateMessage(to, templateName, languageCode, components);
+        const result = await sendTemplateMessage(cleanPhoneNumber(to), templateName, languageCode, components);
 
         await db.query(
           `INSERT INTO messages (campaign_id, contact_id, direction, message_body, media_url, meta_message_id, status, error_message, timestamp)
@@ -157,7 +158,7 @@ const processInMemory = async (messages, campaignId, templateName, languageCode,
     }
 
     try {
-      const result = await sendTemplateMessage(to, templateName, languageCode, messageComponents);
+      const result = await sendTemplateMessage(cleanPhoneNumber(to), templateName, languageCode, messageComponents);
 
       await db.query(
         `INSERT INTO messages (campaign_id, contact_id, direction, message_body, media_url, meta_message_id, status, error_message, timestamp)

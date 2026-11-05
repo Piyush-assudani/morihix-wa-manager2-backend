@@ -8,6 +8,7 @@ const os = require("os");
 const path = require("path");
 const { uploadMediaToMeta, getTemplates } = require("../services/metaApi");
 const { formatMediaUrl } = require("../services/localStorageService");
+const { cleanPhoneNumber } = require("../utils/phone");
 
 const isValidUuid = (val) =>
   typeof val === "string" &&
@@ -173,7 +174,7 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
         bodyParams.push({ type: "text", text: "Update" });
       }
 
-      const sanitizedPhone = member.phone_number ? String(member.phone_number).replace(/\D/g, "") : "";
+      const sanitizedPhone = cleanPhoneNumber(member.phone_number);
 
       return {
         to: sanitizedPhone,
