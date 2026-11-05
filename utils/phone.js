@@ -1,5 +1,9 @@
 /**
  * Phone number sanitization and normalization utilities.
+ * Enforces:
+ * - With 91: exactly 12 digits (91 + 10 digits). If > 12, takes first 12 digits.
+ * - Without 91: exactly 10 digits. If > 10, takes first 10 digits and prepends 91 -> 12 digits.
+ * - Strips any leading 0s or floating point artifacts (.0).
  */
 
 const cleanPhoneNumber = (raw) => {
@@ -18,31 +22,26 @@ const cleanPhoneNumber = (raw) => {
     }
   }
 
-  // 1. If it has a decimal point (e.g. float from Excel/CSV/Python like "9413879444.0" or "919413879444.00")
+  // If it has a decimal point (e.g. float from Excel/CSV/Python like "9413879444.0")
   if (str.includes(".")) {
     str = str.split(".")[0];
   }
 
-  // 2. Remove all non-digits
+  // Remove all non-digits
   let digits = str.replace(/\D/g, "");
 
-  // 3. Trailing zero artifacts from stripped .0:
-  // Case A: 13 digits starting with 91[6-9] and ending in 0 (e.g. 9194138794440 -> 919413879444)
-  if (digits.length === 13 && /^91[6-9]\d{9}0$/.test(digits)) {
+  // If number starts with 0 (e.g. 09413879444) -> strip leading 0s
+  if (digits.startsWith("0")) {
+    digits = digits.replace(/^0+/, "");
+  }
+
+  // Enforce rule:
+  // 1. If starts with 91: exactly 12 digits
+  if (digits.startsWith("91")) {
     digits = digits.slice(0, 12);
-  }
-
-  // Case B: 11 digits starting with [6-9] and ending in 0 (e.g. 94138794440 -> 9413879444)
-  if (digits.length === 11 && /^[6-9]\d{9}0$/.test(digits)) {
-    digits = digits.slice(0, 10);
-  }
-
-  // Case C: Standard 11 digits starting with 0 (e.g. STD format 09413879444)
-  if (digits.length === 11 && digits.startsWith("0")) {
-    digits = "91" + digits.slice(1);
-  } else if (digits.length === 10) {
-    // Case D: Standard 10 digits -> prepend 91
-    digits = "91" + digits;
+  } else if (digits.length >= 10) {
+    // 2. If without 91: exactly 10 digits, prepended with 91 -> 12 digits
+    digits = "91" + digits.slice(0, 10);
   }
 
   return digits;
@@ -51,4 +50,3 @@ const cleanPhoneNumber = (raw) => {
 module.exports = {
   cleanPhoneNumber,
 };
-

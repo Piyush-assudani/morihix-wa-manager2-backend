@@ -304,7 +304,13 @@ router.get("/:id/contacts", async (req, res) => {
        ORDER BY c.created_at DESC`,
       [id]
     );
-    res.json(result.rows);
+
+    const sanitizedRows = result.rows.map(row => ({
+      ...row,
+      phone_number: cleanPhoneNumber(row.phone_number),
+    }));
+
+    res.json(sanitizedRows);
   } catch (err) {
     console.error("❌ List contacts error:", err);
     res.status(500).json({ error: "Failed to fetch list contacts." });
@@ -330,8 +336,8 @@ router.post("/:id/contacts", async (req, res) => {
     }
 
     const cleanedPhone = cleanPhoneNumber(phone_number);
-    if (cleanedPhone.length < 10 || cleanedPhone.length > 15) {
-      return res.status(400).json({ error: "Please enter a valid 10 to 15-digit phone number." });
+    if (!cleanedPhone || cleanedPhone.length !== 12 || !cleanedPhone.startsWith("91")) {
+      return res.status(400).json({ error: "Invalid phone number. Please enter a 10-digit number (or 12-digit with 91)." });
     }
 
     const safeName = (typeof name === "string" ? name.trim().slice(0, 255) : "") || "Unknown";

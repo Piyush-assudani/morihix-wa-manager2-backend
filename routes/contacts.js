@@ -41,7 +41,11 @@ router.get("/", async (req, res) => {
       FROM contacts c
       ORDER BY (SELECT timestamp FROM messages WHERE contact_id = c.id ORDER BY timestamp DESC LIMIT 1) DESC`
     );
-    res.json(result.rows);
+    const sanitized = result.rows.map(c => ({
+      ...c,
+      phone_number: cleanPhoneNumber(c.phone_number),
+    }));
+    res.json(sanitized);
   } catch (err) {
     console.error("❌ List contacts error:", err);
     res.status(500).json({ error: "Failed to fetch contact directory." });
@@ -74,7 +78,10 @@ router.get("/:id", async (req, res) => {
       [id]
     );
 
-    const contact = result.rows[0];
+    const contact = {
+      ...result.rows[0],
+      phone_number: cleanPhoneNumber(result.rows[0].phone_number),
+    };
     contact.last_inbound_at = lastInbound.rows[0]?.timestamp || null;
     contact.window_open = lastInbound.rows[0]?.timestamp
       ? Date.now() - new Date(lastInbound.rows[0].timestamp).getTime() < 24 * 60 * 60 * 1000

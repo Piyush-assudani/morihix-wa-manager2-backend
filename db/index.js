@@ -146,38 +146,48 @@ const initSchema = () => {
       );
     `);
 
-    // 9. Auto-sanitize existing phone numbers with trailing zero artifacts (e.g., 9194138794440 -> 919413879444)
-    db.all(
-      `SELECT id, phone_number FROM contacts WHERE (length(phone_number) = 13 AND phone_number LIKE '91%0') OR (length(phone_number) = 11 AND phone_number LIKE '%0')`,
-      [],
-      (err, rows) => {
-        if (!err && rows && rows.length > 0) {
-          rows.forEach((row) => {
-            let cleaned = row.phone_number;
-            if (cleaned.length === 13 && cleaned.startsWith("91") && cleaned.endsWith("0")) {
-              cleaned = cleaned.slice(0, 12);
-            } else if (cleaned.length === 11 && cleaned.endsWith("0")) {
-              cleaned = "91" + cleaned.slice(0, 10);
-            }
-            if (cleaned !== row.phone_number) {
-              db.get(`SELECT id FROM contacts WHERE phone_number = ?`, [cleaned], (err2, existing) => {
+    // 9. Auto-sanitize all contacts and merge duplicates (e.g., 9194138794440 -> 919413879444)
+    db.all(`SELECT id, phone_number FROM contacts`, [], (err, rows) => {
+      if (!err && rows && rows.length > 0) {
+        rows.forEach((row) => {
+          let clean = String(row.phone_number || "").replace(/\D/g, "");
+          if (clean.startsWith("0")) clean = clean.replace(/^0+/, "");
+          if (clean.startsWith("91")) {
+            clean = clean.slice(0, 12);
+          } else if (clean.length >= 10) {
+            clean = "91" + clean.slice(0, 10);
+          }
+          if (clean && clean !== row.phone_number) {
+            db.get(
+              `SELECT id FROM contacts WHERE phone_number = ? AND id != ?`,
+              [clean, row.id],
+              (err2, existing) => {
                 if (existing) {
+                  // Merge duplicate contact safely
                   db.run(
                     `UPDATE OR IGNORE contact_list_members SET contact_id = ? WHERE contact_id = ?`,
                     [existing.id, row.id],
                     () => {
-                      db.run(`DELETE FROM contacts WHERE id = ?`, [row.id]);
+                      db.run(`DELETE FROM contact_list_members WHERE contact_id = ?`, [row.id], () => {
+                        db.run(
+                          `UPDATE messages SET contact_id = ? WHERE contact_id = ?`,
+                          [existing.id, row.id],
+                          () => {
+                            db.run(`DELETE FROM contacts WHERE id = ?`, [row.id]);
+                          }
+                        );
+                      });
                     }
                   );
                 } else {
-                  db.run(`UPDATE contacts SET phone_number = ? WHERE id = ?`, [cleaned, row.id]);
+                  db.run(`UPDATE contacts SET phone_number = ? WHERE id = ?`, [clean, row.id]);
                 }
-              });
-            }
-          });
-        }
+              }
+            );
+          }
+        });
       }
-    );
+    });
 
     // 10. Auto-migrate existing timestamps to standard ISO-8601 UTC (YYYY-MM-DDTHH:MM:SSZ)
     db.run(
