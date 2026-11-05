@@ -185,27 +185,8 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
     });
 
     const io = req.app.get("io");
-    await processCampaign(
-      messages,
-      campaign.id,
-      template_name.trim(),
-      resolvedLanguageCode,
-      io,
-      media_id,
-      media_type,
-      media_url
-    );
 
-    // Keep history clean: automatically keep the last 100 campaigns
-    db.query(
-      `DELETE FROM campaigns 
-       WHERE id NOT IN (
-         SELECT id FROM campaigns 
-         ORDER BY created_at DESC 
-         LIMIT 100
-       )`
-    ).catch(() => {});
-
+    // Respond to the client immediately so the browser does not time out on large contact lists
     res.status(201).json({
       message: "Campaign launched and queued for delivery",
       campaign: {
@@ -216,6 +197,30 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
         created_at: campaign.created_at,
       },
     });
+
+    // Run campaign dispatch asynchronously in the background
+    processCampaign(
+      messages,
+      campaign.id,
+      template_name.trim(),
+      resolvedLanguageCode,
+      io,
+      media_id,
+      media_type,
+      media_url
+    ).catch((procErr) => {
+      console.error(`❌ Background campaign processor failed for ${campaign.id}:`, procErr);
+    });
+
+    // Keep history clean: automatically keep the last 100 campaigns
+    db.query(
+      `DELETE FROM campaigns 
+       WHERE id NOT IN (
+         SELECT id FROM campaigns 
+         ORDER BY created_at DESC 
+         LIMIT 100
+       )`
+    ).catch(() => {});
   } catch (err) {
     console.error("❌ Campaign creation error:", err);
     res.status(500).json({ error: "Failed to create and dispatch campaign." });

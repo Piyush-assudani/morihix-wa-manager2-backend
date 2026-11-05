@@ -132,7 +132,7 @@ const initBullMQ = (io) => {
 
 
 const processInMemory = async (messages, campaignId, templateName, languageCode, io, mediaId = null, mediaType = null, mediaUrl = null) => {
-  const DELAY_MS = 2000; 
+  const DELAY_MS = 350; 
 
   let components = [];
   if (mediaType && (mediaId || mediaUrl)) {
