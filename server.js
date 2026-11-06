@@ -151,6 +151,7 @@ app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/privacy", privacyRoutes);
 app.use("/privacy", privacyRoutes);
 app.use("/webhook", webhookRoutes);
+app.use("/api/webhook", webhookRoutes);
 
 // Local Media & Uploads Static Hosting
 const uploadsPath = path.join(__dirname, "uploads");
