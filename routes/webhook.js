@@ -4,6 +4,7 @@ const db = require("../db");
 const { downloadMediaFromMeta } = require("../services/metaApi");
 const { uploadBufferToCloudinary } = require("../services/cloudinaryService");
 const { formatMetaError } = require("../utils/metaErrors");
+const { cleanPhoneNumber } = require("../utils/phone");
 
 // Status hierarchy — higher number = more progressed
 const STATUS_PRIORITY = {
@@ -202,19 +203,36 @@ router.post("/", async (req, res) => {
                 continue;
               }
 
-              // Only upgrade status, never downgrade
-              // e.g., don't go from "read" back to "delivered"
+              // Lookup message: 1st by exact meta_message_id, 2nd fallback by recipient phone
               const existing = await db.query(
-                `SELECT id, status, campaign_id FROM messages WHERE meta_message_id = $1`,
+                `SELECT id, status, campaign_id, contact_id, meta_message_id FROM messages WHERE meta_message_id = $1`,
                 [metaMessageId]
               );
 
-              if (existing.rows.length === 0) {
-                console.log(`⚠️ No message found for wamid ${metaMessageId} (status: ${newStatus})`);
+              let existingMsg = null;
+              if (existing.rows.length > 0) {
+                existingMsg = existing.rows[0];
+              } else if (recipientId) {
+                const cleanRecipient = cleanPhoneNumber(recipientId);
+                const fallbackMsg = await db.query(
+                  `SELECT m.id, m.status, m.campaign_id, m.contact_id, m.meta_message_id 
+                   FROM messages m 
+                   JOIN contacts c ON m.contact_id = c.id 
+                   WHERE (c.phone_number = $1 OR c.phone_number = $2) AND m.direction = 'outbound'
+                   ORDER BY m.timestamp DESC LIMIT 1`,
+                  [cleanRecipient, recipientId]
+                );
+                if (fallbackMsg.rows.length > 0) {
+                  existingMsg = fallbackMsg.rows[0];
+                  console.log(`🔗 Matched status "${newStatus}" to message ${existingMsg.id} via recipient phone ${recipientId}`);
+                }
+              }
+
+              if (!existingMsg) {
+                console.log(`⚠️ No message found for wamid ${metaMessageId} (recipient: ${recipientId}, status: ${newStatus})`);
                 continue;
               }
 
-              const existingMsg = existing.rows[0];
               const currentStatus = existingMsg.status;
               const currentPriority = STATUS_PRIORITY[currentStatus] ?? -1;
               const newPriority = STATUS_PRIORITY[newStatus] ?? -1;
@@ -230,11 +248,21 @@ router.post("/", async (req, res) => {
               if (newStatus === "failed" && status.errors && status.errors.length > 0) {
                 const errObj = status.errors[0];
                 errorMsg = formatMetaError(errObj);
+                console.warn(`❌ WhatsApp delivery failure for ${recipientId}: ${errorMsg}`);
               }
 
+              const statusTimestamp = status.timestamp
+                ? new Date(Number(status.timestamp) * 1000).toISOString()
+                : new Date().toISOString();
+
               await db.query(
-                `UPDATE messages SET status = $1, error_message = COALESCE($3, error_message) WHERE meta_message_id = $2`,
-                [newStatus, metaMessageId, errorMsg]
+                `UPDATE messages 
+                 SET status = $1, 
+                     error_message = COALESCE($3, error_message), 
+                     timestamp = CASE WHEN $1 = 'read' OR $1 = 'delivered' THEN $4 ELSE timestamp END,
+                     meta_message_id = COALESCE(meta_message_id, $2)
+                 WHERE id = $5`,
+                [newStatus, metaMessageId, errorMsg, statusTimestamp, existingMsg.id]
               );
 
               console.log(`📊 Status updated: ${currentStatus} → ${newStatus} for ${recipientId} (${metaMessageId})${errorMsg ? ` [${errorMsg}]` : ''}`);
@@ -249,6 +277,7 @@ router.post("/", async (req, res) => {
                   status: newStatus,
                   recipient: recipientId,
                   error_message: errorMsg,
+                  timestamp: statusTimestamp,
                 });
               }
             } catch (statusErr) {
@@ -263,5 +292,52 @@ router.post("/", async (req, res) => {
   }
 });
 
+/**
+ * GET /status (and /api/webhook/status)
+ * Diagnostics endpoint showing current webhook configuration, verify token, and live logs
+ */
+router.get("/status", async (req, res) => {
+  try {
+    const totalLogs = await db.query("SELECT COUNT(*) as count FROM webhook_logs");
+    const lastLogs = await db.query("SELECT * FROM webhook_logs ORDER BY created_at DESC LIMIT 15");
+    const verifyToken = process.env.META_WEBHOOK_VERIFY_TOKEN || process.env.WEBHOOK_VERIFY_TOKEN || "vijaysetu_webhook_verify_token";
+
+    res.json({
+      configured: true,
+      callback_url: "https://morihix-wa-manager.piyushassudani.in/webhook",
+      verify_token: verifyToken,
+      total_events_received: parseInt(totalLogs.rows[0]?.count || 0, 10),
+      recent_events: lastLogs.rows.map(row => {
+        let parsed = null;
+        try { parsed = JSON.parse(row.payload); } catch(e) {}
+        return {
+          id: row.id,
+          created_at: row.created_at,
+          payload: parsed,
+        };
+      }),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /logs (and /api/webhook/logs)
+ * Detailed recent payload dump
+ */
+router.get("/logs", async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 25, 100);
+    const logs = await db.query(`SELECT * FROM webhook_logs ORDER BY created_at DESC LIMIT $1`, [limit]);
+    res.json(logs.rows.map(l => {
+      let payload = null;
+      try { payload = JSON.parse(l.payload); } catch (e) {}
+      return { id: l.id, created_at: l.created_at, payload };
+    }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 module.exports = router;
