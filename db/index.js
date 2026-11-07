@@ -218,6 +218,7 @@ const query = (text, params = []) => {
     let cleanText = text
       .replace(/\bNOW\(\)/gi, "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
       .replace(/\bILIKE\b/gi, "LIKE")
+      .replace(/\$(\d+)/g, "?$1")
       .trim();
 
     // Remove any trailing semicolon inside wrapped queries

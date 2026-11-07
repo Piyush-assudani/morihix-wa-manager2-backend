@@ -245,9 +245,13 @@ router.post("/", async (req, res) => {
 
               // Extract error message if failed
               let errorMsg = null;
-              if (newStatus === "failed" && status.errors && status.errors.length > 0) {
-                const errObj = status.errors[0];
-                errorMsg = formatMetaError(errObj);
+              if (newStatus === "failed") {
+                if (status.errors && status.errors.length > 0) {
+                  const errObj = status.errors[0];
+                  errorMsg = formatMetaError(errObj);
+                } else {
+                  errorMsg = "Message could not be delivered by Meta (undeliverable or recipient unavailable)";
+                }
                 console.warn(`❌ WhatsApp delivery failure for ${recipientId}: ${errorMsg}`);
               }
 
@@ -258,7 +262,7 @@ router.post("/", async (req, res) => {
               await db.query(
                 `UPDATE messages 
                  SET status = $1, 
-                     error_message = COALESCE($3, error_message), 
+                     error_message = CASE WHEN $1 = 'failed' THEN COALESCE($3, error_message, 'Delivery failed by Meta WhatsApp Cloud') ELSE error_message END, 
                      timestamp = CASE WHEN $1 = 'read' OR $1 = 'delivered' THEN $4 ELSE timestamp END,
                      meta_message_id = COALESCE(meta_message_id, $2)
                  WHERE id = $5`,
