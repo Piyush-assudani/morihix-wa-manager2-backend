@@ -35,7 +35,9 @@ function formatMetaError(errorInput) {
     case 131056:
       return "User has blocked or opted out of messages (Meta #131056)";
     case 130429:
-      return "Rate limit hit on WhatsApp Cloud API account (Meta #130429)";
+      return details
+        ? `WhatsApp rate limit hit: ${details} (Meta #130429)`
+        : "WhatsApp daily tier limit reached (250 conversations/24h) or sent too fast. Meta resets your daily quota within 24 hours (Meta #130429)";
     case 132000:
       return `Template parameter mismatch: ${details || message || 'check template variable count'} (Meta #132000)`;
     case 132001:
