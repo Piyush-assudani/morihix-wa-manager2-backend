@@ -214,13 +214,14 @@ const uploadMediaToMeta = async (filePath, mimeType) => {
         Authorization: `Bearer ${token}`,
         ...formData.getHeaders(),
       },
-      timeout: 30000,
+      timeout: 120000, // 120s timeout for large media files (up to 25MB)
     });
 
     return response.data.id;
   } catch (err) {
+    const detail = err.response?.data?.error?.message || err.message;
     console.error("❌ Meta API media upload error:", err.response?.data || err.message);
-    return null;
+    throw new Error(`Meta media upload failed: ${detail}`);
   }
 };
 

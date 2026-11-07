@@ -124,7 +124,11 @@ router.post("/", uploadMedia.single("mediaFile"), async (req, res) => {
         });
       }
 
-      media_id = await uploadMediaToMeta(req.file.path, req.file.mimetype);
+      try {
+        media_id = await uploadMediaToMeta(req.file.path, req.file.mimetype);
+      } catch (uploadErr) {
+        return res.status(502).json({ error: uploadErr.message });
+      }
       if (!media_id) {
         return res.status(500).json({ error: "Failed to upload media to WhatsApp Meta API." });
       }

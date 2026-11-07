@@ -209,4 +209,54 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/contacts/cleanup-numbers
+ * Scrub all contacts in the database: enforces 12-digit format (91 + 10 digits),
+ * strips trailing zeroes or non-digits, and safely merges any duplicate records.
+ */
+router.post("/cleanup-numbers", async (req, res) => {
+  try {
+    const allContacts = await db.query("SELECT id, phone_number, name, city FROM contacts");
+    let cleanedCount = 0;
+    let mergedCount = 0;
+
+    for (const contact of allContacts.rows) {
+      const cleaned = cleanPhoneNumber(contact.phone_number);
+      if (cleaned && cleaned !== contact.phone_number) {
+        // Check if another contact already exists with this cleaned number
+        const existing = await db.query(
+          "SELECT id FROM contacts WHERE phone_number = $1 AND id != $2",
+          [cleaned, contact.id]
+        );
+
+        if (existing.rows.length > 0) {
+          const targetId = existing.rows[0].id;
+          // Merge relationships
+          await db.query(
+            "UPDATE OR IGNORE contact_list_members SET contact_id = $1 WHERE contact_id = $2",
+            [targetId, contact.id]
+          );
+          await db.query("DELETE FROM contact_list_members WHERE contact_id = $1", [contact.id]);
+          await db.query("UPDATE messages SET contact_id = $1 WHERE contact_id = $2", [targetId, contact.id]);
+          await db.query("DELETE FROM contacts WHERE id = $1", [contact.id]);
+          mergedCount++;
+        } else {
+          await db.query("UPDATE contacts SET phone_number = $1 WHERE id = $2", [cleaned, contact.id]);
+          cleanedCount++;
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Database numbers cleaned up successfully. ${cleanedCount} numbers sanitized, ${mergedCount} duplicates merged.`,
+      cleanedCount,
+      mergedCount,
+    });
+  } catch (err) {
+    console.error("❌ Cleanup numbers error:", err);
+    res.status(500).json({ error: "Failed to cleanup numbers: " + err.message });
+  }
+});
+
 module.exports = router;
