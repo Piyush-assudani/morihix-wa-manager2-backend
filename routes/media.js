@@ -50,30 +50,41 @@ router.post("/", upload.single("file"), async (req, res) => {
     if (req.file.mimetype.startsWith("video/")) resourceType = "video";
     if (req.file.mimetype.startsWith("audio/")) resourceType = "audio";
 
-    // 1. Upload to Meta Cloud API (stream directly from temp file)
-    let metaMediaId = null;
-    try {
-      metaMediaId = await uploadMediaToMeta(req.file.path, req.file.mimetype);
-    } catch (metaErr) {
-      console.warn("⚠️ Meta upload skipped/failed, saved to server storage:", metaErr.message);
-    }
+    const tempPath = req.file.path;
+    const mimeType = req.file.mimetype;
+    const originalName = req.file.originalname;
 
-    // 2. Store file directly on local server filesystem
-    const mediaUrl = await uploadFileToServer(req.file.path, "library", resourceType);
+    // 1. Store file directly on local server filesystem immediately
+    const mediaUrl = await uploadFileToServer(tempPath, "library", resourceType);
 
-    // 3. Clean up temp multer file
-    fs.promises.unlink(req.file.path).catch(() => {});
-
-    // 4. Save to database
+    // 2. Save to database immediately so client never times out waiting for Meta upload
     const result = await db.query(
       `INSERT INTO media_assets (original_name, media_url, meta_media_id, resource_type)
        VALUES ($1, $2, $3, $4) RETURNING *`,
-      [req.file.originalname, mediaUrl, metaMediaId, resourceType]
+      [originalName, mediaUrl, null, resourceType]
     );
+    const savedAsset = result.rows[0];
 
-    res.status(201).json(result.rows[0]);
+    res.status(201).json(savedAsset);
+
+    // 3. Upload to Meta Cloud API in background & update meta_media_id, then clean up temp file
+    uploadMediaToMeta(tempPath, mimeType)
+      .then(async (metaMediaId) => {
+        if (metaMediaId && savedAsset?.id) {
+          await db.query(`UPDATE media_assets SET meta_media_id = $1 WHERE id = $2`, [metaMediaId, savedAsset.id]);
+        }
+      })
+      .catch((metaErr) => {
+        console.warn("⚠️ Background Meta media pre-upload failed (public URL fallback still works):", metaErr.message);
+      })
+      .finally(() => {
+        fs.promises.unlink(tempPath).catch(() => {});
+      });
   } catch (err) {
     console.error("❌ Media upload error:", err);
+    if (req.file?.path) {
+      fs.promises.unlink(req.file.path).catch(() => {});
+    }
     res.status(500).json({ error: err.message });
   }
 });
