@@ -46,9 +46,14 @@ router.post("/", upload.single("file"), async (req, res) => {
     }
 
     let resourceType = "auto";
-    if (req.file.mimetype.startsWith("image/")) resourceType = "image";
-    if (req.file.mimetype.startsWith("video/")) resourceType = "video";
-    if (req.file.mimetype.startsWith("audio/")) resourceType = "audio";
+    const lowerName = (req.file.originalname || "").toLowerCase();
+    if (req.file.mimetype.startsWith("image/") || /\.(jpg|jpeg|png|gif|webp)$/.test(lowerName)) {
+      resourceType = "image";
+    } else if (req.file.mimetype.startsWith("video/") || /\.(mp4|mov|3gp|avi|mkv|webm)$/.test(lowerName)) {
+      resourceType = "video";
+    } else if (req.file.mimetype.startsWith("audio/") || /\.(mp3|ogg|wav|aac|m4a)$/.test(lowerName)) {
+      resourceType = "audio";
+    }
 
     const tempPath = req.file.path;
     const mimeType = req.file.mimetype;
